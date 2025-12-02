@@ -1,4 +1,8 @@
 # Whisper-WebUI
+<div align="center">
+
+**Upstream README** | [ROCm Install Guide](README_ROCM.md)
+</div>
 A Gradio-based browser interface for [Whisper](https://github.com/openai/whisper). You can use it as an Easy Subtitle Generator!
 
 ![screen](https://github.com/user-attachments/assets/caea3afd-a73c-40af-a347-8d57914b1d0f)
