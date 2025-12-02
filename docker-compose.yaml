@@ -1,6 +1,6 @@
 services:
   whisper-webui:
-    image: yogawulala/whisper-webui-rocm:gfx906
+    image: yogawulala/whisper-webui-rocm:rocm6.3-gfx906
     container_name: whisper-webui
 
     # If you need change server_name and sever_port
