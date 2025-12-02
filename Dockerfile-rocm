@@ -1,0 +1,56 @@
+FROM rocm/dev-ubuntu-22.04:6.3.4
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+ADD https://astral.sh/uv/0.9.13/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin/:$PATH"
+RUN uv venv -p python3.10
+ENV PATH="/app/.venv/bin:$PATH"
+
+COPY . ./Whisper-WebUI
+
+RUN uv pip install torch==2.8 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/rocm6.3 && \
+    export VENV_PREFIX=/app/.venv && \
+    export LD_LIBRARY_PATH=$VENV_PREFIX/lib:$LD_LIBRARY_PATH && \
+    export LIBRARY_PATH=$VENV_PREFIX/lib:$LIBRARY_PATH export CPATH=$VENV_PREFIX/include:$LIBRARY_PATH && \
+    export CPATH=$VENV_PREFIX/include:$LIBRARY_PATH && \
+    export CPATH=$VENV_PREFIX/include:$LICPA && \
+    apt install -y git wget ffmpeg libomp-dev cmake hiprand rocrand hipblas rocprim rocthrust hipcub miopen-hip && \
+    sudo ln -s /opt/rocm/llvm/bin/clang++ /usr/bin/clang++ && \
+    git clone https://github.com/arlo-phoenix/CTranslate2-rocm.git --recurse-submodules && \
+    cd CTranslate2-rocm && \
+    export PYTORCH_ROCM_ARCH="gfx906" && \
+    CLANG_CMAKE_CXX_COMPILER=clang++ CXX=clang++ HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)"     cmake -S . -B build -DWITH_MKL=OFF -DWITH_HIP=ON -DCMAKE_HIP_ARCHITECTURES=$PYTORCH_ROCM_ARCH -DBUILD_TESTS=ON -DWITH_CUDNN=ON -DAMDGPU_TARGETS=$PYTORCH_ROCM_ARCH && \
+    cmake --build build -- -j16 && \
+    cd build && \
+    cmake --install . && \
+    sudo ldconfig && \
+    cd ../python && \
+    uv pip install -r install_requirements.txt && \
+    python setup.py bdist_wheel && \
+    uv pip install dist/*.whl && \
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$VENV_PREFIX/lib/ && \
+    cd ../../Whisper-WebUI && \
+    uv pip install faster-whisper==1.1.1 --no-deps
+
+RUN uv pip install git+https://github.com/jhj0517/jhj0517-whisper.git \
+    transformers==4.47.1 \
+    gradio==5.29.0 \
+    gradio-i18n==0.3.1 \
+    pytubefix \
+    ruamel.yaml==0.18.6 \
+    pyannote.audio==3.3.2 \
+    git+https://github.com/jhj0517/ultimatevocalremover_api.git \
+    git+https://github.com/jhj0517/pyrubberband.git \
+    av>=11 \
+    tqdm && \
+    uv pip uninstall hf-xet
+
+WORKDIR /app/Whisper-WebUI
+
+EXPOSE 7860
+
+ENTRYPOINT ["python", "app.py"]
+CMD ["--server_name", "0.0.0.0", "--server_port", "7860"]
