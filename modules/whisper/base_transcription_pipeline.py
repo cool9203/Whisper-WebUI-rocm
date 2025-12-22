@@ -11,6 +11,9 @@ from faster_whisper.vad import VadOptions
 import gc
 from copy import deepcopy
 import time
+import opencc
+import os
+from pathlib import Path
 
 from modules.uvr.music_separator import MusicSeparator
 from modules.utils.paths import (WHISPER_MODELS_DIR, DIARIZATION_MODELS_DIR, OUTPUT_DIR, DEFAULT_PARAMETERS_CONFIG_PATH,
@@ -27,6 +30,7 @@ from modules.vad.silero_vad import SileroVAD
 
 
 logger = get_logger()
+converter = opencc.OpenCC(Path(os.getenv("OPENCC_CONFIG", "s2twp")).stem + ".json")
 
 
 class BaseTranscriptionPipeline(ABC):
@@ -208,6 +212,10 @@ class BaseTranscriptionPipeline(ABC):
         if not result:
             logger.info(f"Whisper did not detected any speech segments in the audio.")
             result = [Segment()]
+
+        # Convert text with opencc
+        for seg in result:
+            seg.text = converter.convert(seg.text)
 
         progress(1.0, desc="Finished.")
         total_elapsed_time = time.time() - start_time
