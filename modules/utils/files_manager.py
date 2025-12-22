@@ -2,6 +2,7 @@ import os
 import fnmatch
 from ruamel.yaml import YAML
 from gradio.utils import NamedString
+from pathlib import Path
 
 from modules.utils.paths import DEFAULT_PARAMETERS_CONFIG_PATH
 
@@ -101,3 +102,20 @@ def read_file(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         subtitle_content = f.read()
     return subtitle_content
+
+
+def load_custom_vocab(file_path, separator=["\t", ",", " "]):
+    custom_vocab = dict()
+    if Path(file_path).exists():
+        with Path(file_path).open("r", encoding="utf-8") as f:
+            for line in f.readlines():
+                if not line.strip():
+                    continue
+                for sep in separator:
+                    if line.count(sep) == 1:
+                        words = line.strip().split(sep)
+                        source_word = words[0]
+                        target_word = words[1]
+                        break
+                custom_vocab[source_word] = target_word
+    return custom_vocab

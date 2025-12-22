@@ -14,6 +14,7 @@ import time
 import opencc
 import os
 from pathlib import Path
+import re
 
 from modules.uvr.music_separator import MusicSeparator
 from modules.utils.paths import (WHISPER_MODELS_DIR, DIARIZATION_MODELS_DIR, OUTPUT_DIR, DEFAULT_PARAMETERS_CONFIG_PATH,
@@ -22,7 +23,7 @@ from modules.utils.constants import *
 from modules.utils.logger import get_logger
 from modules.utils.subtitle_manager import *
 from modules.utils.youtube_manager import get_ytdata, get_ytaudio
-from modules.utils.files_manager import get_media_files, format_gradio_files, load_yaml, save_yaml, read_file
+from modules.utils.files_manager import get_media_files, format_gradio_files, load_yaml, save_yaml, read_file, load_custom_vocab
 from modules.utils.audio_manager import validate_audio
 from modules.whisper.data_classes import *
 from modules.diarize.diarizer import Diarizer
@@ -31,7 +32,6 @@ from modules.vad.silero_vad import SileroVAD
 
 logger = get_logger()
 converter = opencc.OpenCC(Path(os.getenv("OPENCC_CONFIG", "s2twp")).stem + ".json")
-
 
 class BaseTranscriptionPipeline(ABC):
     def __init__(self,
@@ -213,13 +213,28 @@ class BaseTranscriptionPipeline(ABC):
             logger.info(f"Whisper did not detected any speech segments in the audio.")
             result = [Segment()]
 
-        # Convert text with opencc
+        # Convert text with opencc and custom vocab
+        progress(0.99, desc="Localization..")
+        custom_vocab_path = Path(os.getenv("CUSTOM_VOCAB", "./configs/vocab.txt"))
+        custom_vocab = load_custom_vocab(custom_vocab_path + ".txt" if not custom_vocab_path.suffix else custom_vocab_path)
+        logger.info(f"Load custom_vocab: {len(custom_vocab)}")
+        converted_result = []
         for seg in result:
-            seg.text = converter.convert(seg.text)
+            processed_text = seg.text
+            processed_text = converter.convert(processed_text)
+            for source_word, target_word in custom_vocab.items():
+                processed_text = re.sub(source_word, target_word, processed_text)
+            converted_result.append(
+                Segment(
+                    start=seg.start,
+                    end=seg.end,
+                    text=processed_text
+                )
+            )
 
         progress(1.0, desc="Finished.")
         total_elapsed_time = time.time() - start_time
-        return result, total_elapsed_time
+        return converted_result, total_elapsed_time
 
     def transcribe_file(self,
                         files: Optional[List] = None,
