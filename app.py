@@ -1,8 +1,12 @@
 import os
 import argparse
+import time
 import gradio as gr
 from gradio_i18n import Translate, gettext as _
 import yaml
+from pathlib import Path
+from fastapi import FastAPI, File, Form, UploadFile
+from gradio.http_server import start_server
 
 from modules.utils.paths import (FASTER_WHISPER_MODELS_DIR, DIARIZATION_MODELS_DIR, OUTPUT_DIR, WHISPER_MODELS_DIR,
                                  INSANELY_FAST_WHISPER_MODELS_DIR, NLLB_MODELS_DIR, DEFAULT_PARAMETERS_CONFIG_PATH,
@@ -19,6 +23,83 @@ from modules.utils.logger import get_logger
 
 
 logger = get_logger()
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "outputs/chunked_uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+fastapi_app = FastAPI()
+
+
+js_uploader = """
+async () => {
+    const files = document.getElementById("fileInput").files;
+    const uploadProgress = document.getElementById("uploadProgress");
+    if (!files || files.length === 0) return "";
+    const CHUNK_SIZE = 1024 * 1024 * 1; // 1MB 每片，確保繞過伺服器限制
+    let finalPaths = [];
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const fileName = Date.now() + "_" + file.name;
+
+        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+            uploadProgress.innerText = `Uploading ${file.name}: ${Math.round((chunkIdx + 1) / totalChunks * 100)}% of File(${i + 1}/${files.length})`;
+            const start = chunkIdx * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+
+            const formData = new FormData();
+            formData.append("file", chunk);
+            formData.append("filename", fileName);
+            formData.append("chunkIndex", chunkIdx);
+            formData.append("totalChunks", totalChunks);
+
+            const response = await fetch("/api/upload_chunk", {
+                method: "POST",
+                body: formData
+            });
+            const result = await response.json();
+            if (result.status === "completed") {
+                finalPaths.push(result.path);
+            }
+        }
+    }
+    uploadProgress.innerText = `Upload completed for all files.`;
+    return JSON.stringify(finalPaths);
+}
+"""
+
+
+html_uploader = """
+<div>
+    <input id="fileInput" type="file" multiple />
+    <p id="uploadProgress"></p>
+</div>
+"""
+
+
+@fastapi_app.post("/api/upload_chunk")
+async def upload_chunk(
+    file: UploadFile = File(...),
+    filename: str = Form(...),
+    chunkIndex: int = Form(...),
+    totalChunks: int = Form(...),
+):
+    save_path = Path(UPLOAD_DIR) / filename
+
+    # 第一個分片：若檔案已存在則刪除舊檔案
+    if chunkIndex == 0 and save_path.exists():
+        save_path.unlink(missing_ok=True)
+
+    # 追加寫入分片內容
+    content = await file.read()
+    with open(save_path, "ab") as f:
+        f.write(content)
+
+    # 檢查是否上傳完成
+    if chunkIndex + 1 == totalChunks:
+        return {"path": str(save_path.resolve()), "status": "completed"}
+    return {"status": "partially_completed"}
 
 
 class App:
@@ -113,7 +194,16 @@ class App:
                 with gr.Tabs():
                     with gr.TabItem(_("File")):  # tab1
                         with gr.Column():
-                            input_file = gr.Files(type="filepath", label=_("Upload File here"), file_types=MEDIA_EXTENSION)
+                            uploader_html = gr.HTML(value=html_uploader)
+                            hidden_file_paths = gr.Textbox(visible=False)
+                            btn_upload = gr.Button("Upload Files", variant="secondary")
+                            btn_upload.click(
+                                None,
+                                inputs=[],
+                                outputs=[hidden_file_paths],
+                                js=js_uploader,
+                            )
+
                             tb_input_folder = gr.Textbox(label="Input Folder Path (Optional)",
                                                          info="Optional: Specify the folder path where the input files are located, if you prefer to use local files instead of uploading them."
                                                               " Leave this field empty if you do not wish to use a local path.",
@@ -137,7 +227,7 @@ class App:
                             files_subtitles = gr.Files(label=_("Downloadable output file"), scale=3, interactive=False)
                             btn_openfolder = gr.Button('📂', scale=1)
 
-                        params = [input_file, tb_input_folder, cb_include_subdirectory, cb_save_same_dir,
+                        params = [hidden_file_paths, tb_input_folder, cb_include_subdirectory, cb_save_same_dir,
                                   dd_file_format, cb_timestamp]
                         params = params + pipeline_params
                         btn_run.click(fn=self.whisper_inf.transcribe_file,
@@ -305,21 +395,36 @@ class App:
 
         # Launch the app with optional gradio settings
         args = self.args
-        self.app.queue(
-            api_open=args.api_open
-        ).launch(
-            share=args.share,
+        # TODO: need add missing args
+        # share=args.share
+        # auth=(args.username, args.password)
+        # root_path=args.root_path
+        # inbrowser=args.inbrowser
+        # allowed_paths=eval(args.allowed_paths)
+        # ssl_verify=args.ssl_verify
+        # TODO: need add gradio queue
+        gr.mount_gradio_app(fastapi_app, self.app, path="")
+        (
+            server_name,
+            server_port,
+            local_url,
+            server,
+        ) = start_server(
+            fastapi_app,
             server_name=args.server_name,
             server_port=args.server_port,
-            auth=(args.username, args.password) if args.username and args.password else None,
-            root_path=args.root_path,
-            inbrowser=args.inbrowser,
-            ssl_verify=args.ssl_verify,
+            ssl_certfile=args.ssl_certfile,
             ssl_keyfile=args.ssl_keyfile,
             ssl_keyfile_password=args.ssl_keyfile_password,
-            ssl_certfile=args.ssl_certfile,
-            allowed_paths=eval(args.allowed_paths) if args.allowed_paths else None
         )
+        print(f"* Running on local URL:  {local_url.rstrip('/')}")
+        try:
+            while True:
+                time.sleep(0.1)
+        except (KeyboardInterrupt, OSError):
+            print("Keyboard interruption in main thread... closing server.")
+            if server:
+                server.close()
 
     @staticmethod
     def open_folder(folder_path: str):

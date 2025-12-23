@@ -15,6 +15,7 @@ import opencc
 import os
 from pathlib import Path
 import re
+import json
 
 from modules.uvr.music_separator import MusicSeparator
 from modules.utils.paths import (WHISPER_MODELS_DIR, DIARIZATION_MODELS_DIR, OUTPUT_DIR, DEFAULT_PARAMETERS_CONFIG_PATH,
@@ -286,6 +287,8 @@ class BaseTranscriptionPipeline(ABC):
 
             if input_folder_path:
                 files = get_media_files(input_folder_path, include_sub_directory=include_subdirectory)
+            if isinstance(files, str) and files.startswith("[") and files.endswith("]"):
+                files = json.loads(files)
             if isinstance(files, str):
                 files = [files]
             if files and isinstance(files[0], gr.utils.NamedString):
