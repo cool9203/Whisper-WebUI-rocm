@@ -40,7 +40,15 @@ async () => {
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-        const fileName = Date.now() + "_" + file.name;
+        const date_now = new Date();
+        const year = date_now.getFullYear();
+        const month = String(date_now.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+        const day = String(date_now.getDate()).padStart(2, '0');
+        const hours = String(date_now.getHours()).padStart(2, '0');
+        const minutes = String(date_now.getMinutes()).padStart(2, '0');
+        const seconds = String(date_now.getSeconds()).padStart(2, '0');
+        const milliseconds = String(date_now.getMilliseconds()).padStart(3, '0');
+        const fileName = `${year}-${month}-${day}-${hours}-${minutes}-${seconds}-${milliseconds}_${file.name}`;
 
         for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
             uploadProgress.innerText = `Uploading ${file.name}: ${Math.round((chunkIdx + 1) / totalChunks * 100)}% of File(${i + 1}/${files.length})`;
@@ -70,9 +78,9 @@ async () => {
 """
 
 
-html_uploader = """
+html_uploader = f"""
 <div>
-    <input id="fileInput" type="file" multiple />
+    <input id="fileInput" type="file" multiple accept="{",".join(MEDIA_EXTENSION)}" />
     <p id="uploadProgress"></p>
 </div>
 """
@@ -196,7 +204,7 @@ class App:
                         with gr.Column():
                             uploader_html = gr.HTML(value=html_uploader)
                             hidden_file_paths = gr.Textbox(visible=False)
-                            btn_upload = gr.Button("Upload Files", variant="secondary")
+                            btn_upload = gr.Button("上傳檔案", variant="secondary")
                             btn_upload.click(
                                 None,
                                 inputs=[],
@@ -230,6 +238,7 @@ class App:
                         params = [hidden_file_paths, tb_input_folder, cb_include_subdirectory, cb_save_same_dir,
                                   dd_file_format, cb_timestamp]
                         params = params + pipeline_params
+
                         btn_run.click(fn=self.whisper_inf.transcribe_file,
                                       inputs=params,
                                       outputs=[tb_indicator, files_subtitles])

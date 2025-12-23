@@ -279,6 +279,9 @@ class BaseTranscriptionPipeline(ABC):
         result_file_path:
             Output file path to return to gr.Files()
         """
+        if not files:
+            raise gr.Error("請選擇檔案並按下上傳")
+
         try:
             params = TranscriptionPipelineParams.from_list(list(pipeline_params))
             writer_options = {
